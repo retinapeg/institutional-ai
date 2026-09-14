@@ -18,8 +18,8 @@ MISSION
   -> COMPLETE
 ```
 
-`BLOCKED` and `FAILED` are explicit terminal states. Every meaningful transition and mutation emits
-an audit event.
+`BLOCKED` and `FAILED` are explicit interruption states with a recorded recovery checkpoint. Every
+meaningful transition and mutation emits an audit event.
 
 ## Core aggregate
 
@@ -34,7 +34,7 @@ One `ProjectState` is the durable aggregate for a mission. It contains:
 - project and role budget ledgers;
 - a final `DirectorReport` that preserves disagreement.
 
-The store writes an atomic canonical JSON snapshot and an append-only JSONL event stream. Specialist
+The store writes an atomic typed JSON snapshot and an append-only JSONL event stream. Specialist
 artifacts are separately attributable files under their worker project workspace.
 
 ## Invariants
@@ -98,4 +98,3 @@ The web layer does not orchestrate work. It creates/runs a mission through the e
 single `ProjectSnapshot`: mission, state, workers, graph, communications, reports, reviews, dissent,
 role changes, director judgement, artifacts, and audit events. The deterministic MVP may run
 synchronously; queues and streaming wait until real provider latency requires them.
-

@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Institutional AI</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0d12;
+      --panel: #121823;
+      --line: #273245;
+      --text: #edf3fc;
+      --muted: #9aa9bd;
+      --cyan: #62d9d0;
+      --gold: #f5c96a;
+      --red: #ff8a8a;
+      --green: #84e1a6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 90% 0, #18314a 0, transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .16;
+      background-image: linear-gradient(#fff1 1px, transparent 1px),
+                        linear-gradient(90deg, #fff1 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+    header, main { width: min(1420px, calc(100% - 32px)); margin-inline: auto; }
+    header { padding: 40px 0 22px; display: grid; gap: 16px; }
+    .eyebrow { color: var(--cyan); letter-spacing: .16em; text-transform: uppercase; font-size: 12px; }
+    h1 { margin: 0; font-size: clamp(32px, 6vw, 66px); line-height: .95; letter-spacing: -.04em; }
+    h1 span { color: var(--cyan); }
+    .intro { max-width: 760px; margin: 0; color: var(--muted); font-size: 17px; }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: #0c1119dd;
+      border-radius: 14px;
+      position: relative;
+      z-index: 1;
+    }
+    input, button { font: inherit; }
+    input {
+      width: 100%;
+      color: var(--text);
+      background: #080c12;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 12px 14px;
+    }
+    input:focus, button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+    button {
+      border: 0;
+      border-radius: 9px;
+      padding: 12px 18px;
+      color: #071211;
+      background: var(--cyan);
+      font-weight: 750;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: wait; }
+    #notice { min-height: 24px; color: var(--muted); }
+    #notice.error { color: var(--red); }
+    main { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; padding-bottom: 60px; }
+    section {
+      grid-column: span 6;
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(145deg, #141b27ee, #0e141eee);
+      box-shadow: 0 18px 50px #0004;
+      position: relative;
+      z-index: 1;
+    }
+    section.wide { grid-column: 1 / -1; }
+    section.third { grid-column: span 4; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    h2 { margin: 0 0 14px; font-size: 14px; letter-spacing: .1em; text-transform: uppercase; }
+    h3 { margin: 0; font-size: 16px; }
+    p { margin: 7px 0; }
+    .muted, .empty { color: var(--muted); }
+    .empty { padding: 16px 0; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 8px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .badge.COMPLETE, .badge.ACCEPTED, .badge.APPROVED, .badge.REVISED { color: var(--green); }
+    .badge.DISPUTED, .badge.CHANGES_REQUESTED, .badge.FAILED { color: var(--red); }
+    .metric-grid, .card-grid { display: grid; gap: 10px; }
+    .metric-grid { grid-template-columns: repeat(6, 1fr); }
+    .card-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+    .metric, .card, .row {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0a1018aa;
+    }
+    .metric { padding: 12px; }
+    .metric strong { display: block; color: var(--gold); font-size: 24px; }
+    .metric span { color: var(--muted); font-size: 12px; }
+    .card { padding: 13px; }
+    .card-top { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+    .row { padding: 10px 12px; margin-top: 8px; }
+    .row strong { color: var(--cyan); }
+    .confidence { margin-top: 10px; height: 4px; border-radius: 4px; background: #202a38; overflow: hidden; }
+    .confidence span { display: block; height: 100%; background: var(--cyan); }
+    .director { border-color: #3b7f7a; }
+    .org { display: grid; gap: 10px; }
+    .org-director { width: min(330px, 100%); margin-inline: auto; text-align: center; }
+    .org-line { height: 20px; width: 1px; margin: -10px auto 0; background: var(--line); }
+    .org-team { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+    .org-team .card { text-align: center; }
+    .list { display: grid; gap: 8px; max-height: 520px; overflow: auto; padding-right: 3px; }
+    .dissent { border-left: 3px solid var(--red); padding: 8px 12px; background: #31141966; margin-top: 8px; }
+    .director-copy { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .director-copy > div { padding: 12px; border-left: 2px solid var(--cyan); background: #08101888; }
+    ul { margin: 8px 0 0; padding-left: 20px; }
+    code { color: var(--gold); overflow-wrap: anywhere; }
+    @media (max-width: 900px) {
+      section, section.third { grid-column: 1 / -1; }
+      .metric-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 560px) {
+      header, main { width: min(100% - 20px, 1420px); }
+      .controls, .director-copy { grid-template-columns: 1fr; }
+      .metric-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">Dynamic organisation G(t) · deterministic MVP</div>
+    <h1>Institutional <span>AI</span></h1>
+    <p class="intro">One mission. Independent specialist ownership. Typed challenge, governed revision, visible dissent, and a traceable Director judgement.</p>
+    <form id="controls" class="controls">
+      <label hidden for="mission-input">Mission</label>
+      <input id="mission-input" maxlength="2000" value="Analyse a toy urban fleet optimisation problem and propose an efficient modelling strategy.">
+      <button id="run-button" type="submit">Run institutional demo</button>
+    </form>
+    <div id="notice" role="status" aria-live="polite">Loading the latest project…</div>
+  </header>
+  <main>
+    <section id="mission" class="wide"></section>
+    <section id="organisation" class="wide"></section>
+    <section id="workers" class="wide"></section>
+    <section id="inbox"></section>
+    <section id="artifacts"></section>
+    <section id="reports" class="wide"></section>
+    <section id="disagreements"></section>
+    <section id="organisation-changes"></section>
+    <section id="director-report" class="wide"></section>
+    <section id="audit-log" class="wide"></section>
+  </main>
+  <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const node = (tag, className, text) => {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      if (text !== undefined) element.textContent = String(text);
+      return element;
+    };
+    const values = (object) => Object.values(object || {});
+    const workerRole = (state, id) => state.workers?.[id]?.name || state.workers?.[id]?.role || id || "system";
+    const setNotice = (text, error = false) => {
+      $("notice").textContent = text;
+      $("notice").className = error ? "error" : "";
+    };
+    const heading = (title, badge) => {
+      const head = node("div", "section-head");
+      head.append(node("h2", "", title));
+      if (badge) head.append(node("span", `badge ${badge}`, badge));
+      return head;
+    };
+    const empty = (text) => node("p", "empty", text);
+    const list = (items) => {
+      const ul = node("ul");
+      (items || []).forEach((item) => ul.append(node("li", "", item)));
+      return ul;
+    };
+    const card = (title, badge, body) => {
+      const item = node("article", "card");
+      const top = node("div", "card-top");
+      top.append(node("h3", "", title), node("span", `badge ${badge || ""}`, badge || ""));
+      item.append(top);
+      if (body) item.append(node("p", "muted", body));
+      return item;
+    };
+    function renderMission(state) {
+      const target = $("mission");
+      target.replaceChildren(heading("Mission", state.status));
+      target.append(node("p", "", state.mission));
+      const metrics = node("div", "metric-grid");
+      const data = [
+        [values(state.workers).length, "workers"], [values(state.tasks).length, "tasks"],
+        [values(state.reports).length, "reports"], [values(state.reviews).length, "reviews"],
+        [values(state.messages).length, "messages"], [values(state.audit_events).length, "events"]
+      ];
+      data.forEach(([value, label]) => {
+        const metric = node("div", "metric");
+        metric.append(node("strong", "", value), node("span", "", label));
+        metrics.append(metric);
+      });
+      target.append(metrics);
+    }
+    function renderOrganisation(state) {
+      const target = $("organisation");
+      target.replaceChildren(heading("Organisation", "G(t)"));
+      const shell = node("div", "org");
+      const director = state.workers?.[state.director_worker_id];
+      if (!director) { target.append(empty("Team not formed yet.")); return; }
+      const lead = card(director.name, "Director", director.owns.join(" · "));
+      lead.classList.add("org-director", "director");
+      shell.append(lead, node("div", "org-line"));
+      const team = node("div", "org-team");
+      values(state.workers).filter((worker) => worker.id !== director.id).forEach((worker) => {
+        const dynamic = worker.created_by !== director.created_by && worker.role === "OperationsResearcher";
+        team.append(card(worker.name, dynamic ? "dynamic" : worker.status, worker.jurisdiction.join(" · ")));
+      });
+      shell.append(team);
+      target.append(shell);
+    }
+    function renderWorkers(state) {
+      const target = $("workers");
+      target.replaceChildren(heading("Workers"));
+      const grid = node("div", "card-grid");
+      const tasks = values(state.tasks);
+      values(state.workers).forEach((worker) => {
+        const task = tasks.find((item) => item.owner_worker_id === worker.id);
+        const item = card(worker.name, worker.status, task?.title || "No active task");
+        item.append(node("p", "", `Jurisdiction: ${worker.jurisdiction.join(", ")}`));
+        item.append(node("p", "muted", `Confidence ${Math.round(worker.confidence.score * 100)}% · ${worker.confidence.rationale}`));
+        const bar = node("div", "confidence");
+        const fill = node("span");
+        fill.style.width = `${worker.confidence.score * 100}%`;
+        bar.append(fill); item.append(bar); grid.append(item);
+      });
+      target.append(grid.children.length ? grid : empty("No workers yet."));
+    }
+    function renderMessages(state) {
+      const target = $("inbox");
+      target.replaceChildren(heading("Inbox / communication"));
+      const shell = node("div", "list");
+      values(state.messages).slice(-24).reverse().forEach((message) => {
+        const item = node("div", "row");
+        item.append(node("strong", "", message.payload.kind));
+        item.append(node("p", "", message.subject));
+        item.append(node("small", "muted", `${workerRole(state, message.from_worker_id)} → ${message.to_worker_ids.map((id) => workerRole(state, id)).join(", ")}`));
+        shell.append(item);
+      });
+      target.append(shell.children.length ? shell : empty("No messages yet."));
+    }
+    function renderArtifacts(state) {
+      const target = $("artifacts");
+      target.replaceChildren(heading("Projects / artifacts"));
+      const shell = node("div", "list");
+      values(state.artifacts).forEach((artifact) => {
+        const item = node("div", "row");
+        item.append(node("strong", "", workerRole(state, artifact.creator_worker_id)));
+        item.append(node("p", "", artifact.relative_path));
+        item.append(node("code", "", `${artifact.sha256.slice(0, 14)}… · v${artifact.version}`));
+        shell.append(item);
+      });
+      target.append(shell.children.length ? shell : empty("No artifacts yet."));
+    }
+    function renderReports(state) {
+      const target = $("reports");
+      target.replaceChildren(heading("Reports", state.barrier?.unlocked ? "barrier unlocked" : "sealed"));
+      const grid = node("div", "card-grid");
+      values(state.reports).sort((a, b) => a.worker_id.localeCompare(b.worker_id) || a.version - b.version).forEach((report) => {
+        const item = card(`${workerRole(state, report.worker_id)} · v${report.version}`, report.status, report.conclusion);
+        item.append(node("p", "", `Evidence: ${report.evidence.length} · confidence ${Math.round(report.confidence.score * 100)}%`));
+        if (report.supersedes_report_id) item.append(node("code", "", `supersedes ${report.supersedes_report_id}`));
+        grid.append(item);
+      });
+      target.append(grid.children.length ? grid : empty("Independent reports have not been committed."));
+    }
+    function renderDisagreements(state) {
+      const target = $("disagreements");
+      target.replaceChildren(heading("Disagreements"));
+      const disagreements = state.director_report?.disagreements || [];
+      disagreements.forEach((text) => target.append(node("div", "dissent", text)));
+      if (!disagreements.length) target.append(empty("No Director synthesis yet; dissent will not be inferred."));
+    }
+    function renderChanges(state) {
+      const target = $("organisation-changes");
+      target.replaceChildren(heading("Organisation changes"));
+      const requests = values(state.role_requests);
+      requests.forEach((request) => {
+        const item = card(request.request.requested_role, request.status, request.request.reason);
+        item.append(node("p", "muted", `Requested by ${workerRole(state, request.requested_by_worker_id)}`));
+        if (request.decision_reason) item.append(node("p", "", request.decision_reason));
+        target.append(item);
+      });
+      if (!requests.length) target.append(empty("No role requests yet."));
+    }
+    function renderDirector(state) {
+      const target = $("director-report");
+      target.replaceChildren(heading("Final Director report"));
+      const report = state.director_report;
+      if (!report) { target.append(empty("Director judgement is pending review and revision.")); return; }
+      const grid = node("div", "director-copy");
+      const sections = [
+        ["Consensus", report.consensus], ["Disagreements", report.disagreements],
+        ["Evidence", report.evidence], ["Assumptions", report.assumptions],
+        ["Risks", report.risks], ["Unresolved questions", report.unresolved_questions]
+      ];
+      sections.forEach(([title, items]) => {
+        const block = node("div"); block.append(node("h3", "", title), list(items)); grid.append(block);
+      });
+      const judgement = node("div");
+      judgement.append(node("h3", "", "Director judgement"), node("p", "", report.director_judgement));
+      const action = node("div");
+      action.append(node("h3", "", "Recommended action"), node("p", "", report.recommended_action));
+      grid.append(judgement, action); target.append(grid);
+    }
+    function renderAudit(state) {
+      const target = $("audit-log");
+      target.replaceChildren(heading("Audit log", `${values(state.audit_events).length} events`));
+      const shell = node("div", "list");
+      values(state.audit_events).slice(-30).reverse().forEach((event) => {
+        const item = node("div", "row");
+        item.append(node("strong", "", `#${event.sequence} ${event.event_type}`));
+        item.append(node("span", "muted", ` · ${workerRole(state, event.actor_id)} · ${event.entity_id}`));
+        shell.append(item);
+      });
+      target.append(shell.children.length ? shell : empty("No audited actions yet."));
+    }
+    function render(state) {
+      renderMission(state); renderOrganisation(state); renderWorkers(state); renderMessages(state);
+      renderArtifacts(state); renderReports(state); renderDisagreements(state); renderChanges(state);
+      renderDirector(state); renderAudit(state);
+      setNotice(`${state.status} · ${state.id} · deterministic provider (no model calls)`);
+    }
+    async function request(url, options) {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail || `${response.status} ${response.statusText}`);
+      }
+      return response.json();
+    }
+    $("controls").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = $("run-button");
+      button.disabled = true; setNotice("Forming the organisation and running the governed lifecycle…");
+      try {
+        const project = await request("/api/projects", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({mission: $("mission-input").value.trim()})
+        });
+        render(await request(`/api/projects/${encodeURIComponent(project.id)}/run`, {method: "POST"}));
+      } catch (error) { setNotice(error.message, true); }
+      finally { button.disabled = false; }
+    });
+    request("/api/projects/latest").then(render).catch(() => {
+      const blank = {mission: $("mission-input").value, status: "READY"};
+      renderMission(blank); ["organisation", "workers", "inbox", "artifacts", "reports", "disagreements", "organisation-changes", "director-report", "audit-log"].forEach((id) => {
+        const target = $(id); target.replaceChildren(heading(id.replaceAll("-", " ")), empty("Run the demo to populate this view."));
+      });
+      setNotice("Ready. The first run is local, deterministic, and free.");
+    });
+  </script>
+</body>
+</html>
