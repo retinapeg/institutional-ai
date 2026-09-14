@@ -6,6 +6,8 @@ from .models import (
     Constitution,
     DirectorReport,
     ProjectState,
+    ReportStatus,
+    ReviewVerdict,
     RoleRequestRecord,
     RoleTemplate,
     Worker,
@@ -189,6 +191,13 @@ class GovernancePolicy:
             raise GovernanceError("director report silently omitted a safety objection")
         if safety_reviews and not report.disagreements:
             raise GovernanceError("director report erased unresolved safety dissent")
+        disputed = any(item.status == ReportStatus.DISPUTED for item in project.reports.values()) or any(
+            item.verdict == ReviewVerdict.DISPUTE for item in project.reviews.values()
+        )
+        if disputed and not any(item.strip() for item in report.disagreements):
+            raise GovernanceError("director report erased explicit disputed findings")
+        if not set(report.artifact_refs) <= set(project.artifacts):
+            raise GovernanceError("director report invented artifact references")
 
     def validate_review_coverage(self, project: ProjectState) -> None:
         if project.barrier is None:

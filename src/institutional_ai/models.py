@@ -116,9 +116,9 @@ class Usage(StrictModel):
 
 
 class Budget(StrictModel):
-    max_calls: int = Field(default=100, ge=1)
+    max_calls: int = Field(default=32, ge=1)
     max_tokens: int = Field(default=100_000, ge=1)
-    max_wall_seconds: float = Field(default=60.0, gt=0)
+    max_wall_seconds: float = Field(default=900.0, gt=0)
     used_calls: int = Field(default=0, ge=0)
     used_tokens: int = Field(default=0, ge=0)
     used_wall_seconds: float = Field(default=0.0, ge=0)
@@ -454,3 +454,13 @@ class ProjectState(StrictModel):
     resume_from: ProjectStatus | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+    execution_seconds: float = Field(default=0, ge=0)
+    worker_models: dict[str, WorkerModel] = Field(default_factory=dict)
+
+
+class WorkerModel(StrictModel):
+    provider: Literal["deterministic", "claude", "codex"]
+    model: str = Field(min_length=1, max_length=120, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$")
+
+
+ProjectState.model_rebuild()

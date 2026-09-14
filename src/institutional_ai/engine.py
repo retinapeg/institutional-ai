@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
+import fcntl
+import time
+
+from .execution import CURRENT_RUN, Cancelled, RunControl
+from .live_providers import ProviderDispatcher
 
 from .governance import GovernanceError, GovernancePolicy, default_constitution
 from .models import (
@@ -36,15 +41,16 @@ from .models import (
     TaskStatus,
     Worker,
     WorkerStatus,
+    WorkerModel,
     new_id,
     utc_now,
 )
 from .providers import (
-    FleetDemoProvider,
     Provider,
     ProviderResult,
     WorkAction,
     WorkRequest,
+    validate_result,
 )
 from .store import ProjectStore, canonical_json, sha256_text
 
@@ -119,15 +125,17 @@ _ROLE_NAMES = {
 class InstitutionalEngine:
     def __init__(self, store: ProjectStore, provider: Provider | None = None):
         self.store = store
-        self.provider = provider or FleetDemoProvider()
+        self.provider = provider or ProviderDispatcher()
         self.provider.preflight()
 
     @classmethod
     def at(cls, data_dir: str | Path) -> InstitutionalEngine:
         return cls(ProjectStore(data_dir))
 
-    def create_project(self, mission: str) -> ProjectState:
-        project = ProjectState(mission=mission, constitution=default_constitution())
+    def create_project(self, mission: str, worker_models: dict[str, WorkerModel] | None = None) -> ProjectState:
+        project = ProjectState(mission=mission, constitution=default_constitution(), worker_models=worker_models or {})
+        if set(project.worker_models) - set(project.constitution.allowed_role_templates):
+            raise InstitutionalError("worker model settings contain an unknown role")
         for memory in self.store.load_organisation_memory()[-12:]:
             project.memories[memory.id] = memory
         self.store.create(project)
@@ -143,7 +151,21 @@ class InstitutionalEngine:
         self.store.save(project)
         return project
 
-    def run(self, project_id: str) -> ProjectState:
+    def run(self, project_id: str, control: RunControl | None = None, *, recover: bool = False) -> ProjectState:
+        # ponytail: one advisory lock per data directory; use a durable scheduler for multiple hosts.
+        with (self.store.root / ".run.lock").open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise InstitutionalError("another project is already running") from exc
+            try:
+                if recover:
+                    self._prepare_recovery(project_id)
+                return self._run(project_id, control)
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def _run(self, project_id: str, control: RunControl | None = None) -> ProjectState:
         project = self.store.load(project_id)
         if project.status == ProjectStatus.COMPLETE:
             return project
@@ -151,11 +173,20 @@ class InstitutionalEngine:
             raise InstitutionalError(
                 f"project is {project.status}; use recover after fixing the cause"
             )
+        control = control or RunControl()
+        control.started = time.monotonic()
+        control.seconds = min(control.seconds, max(0, 900 - project.execution_seconds))
+        token = CURRENT_RUN.set(control)
         try:
-            if project.status == ProjectStatus.CREATED:
+            control.check()
+            if project.status in {ProjectStatus.CREATED, ProjectStatus.TEAM_FORMING}:
                 self._form_team(project)
             if project.status == ProjectStatus.INDEPENDENT_WORK:
                 self._independent_work(project)
+            if project.status == ProjectStatus.REPORT_COMMIT:
+                if not self._require_barrier(project).unlocked:
+                    raise IndependenceBarrierError("report commits are incomplete")
+                self.transition(project, ProjectStatus.PEER_REVIEW, project.director_worker_id or "system")
             if project.status == ProjectStatus.PEER_REVIEW:
                 self._peer_review(project)
             if project.status == ProjectStatus.REVISION:
@@ -165,9 +196,18 @@ class InstitutionalEngine:
         except Exception as exc:
             self._fail(project, exc)
             raise
+        finally:
+            project.execution_seconds += time.monotonic() - control.started
+            CURRENT_RUN.reset(token)
+            self.store.save(project)
+            if project.status == ProjectStatus.COMPLETE:
+                self.store.write_manifest(project)
         return project
 
     def recover(self, project_id: str) -> ProjectState:
+        return self.run(project_id, recover=True)
+
+    def _prepare_recovery(self, project_id: str) -> None:
         project = self.store.load(project_id)
         if (
             project.status not in {ProjectStatus.FAILED, ProjectStatus.BLOCKED}
@@ -188,7 +228,6 @@ class InstitutionalEngine:
             {"resumed_at": resume.value},
         )
         self.store.save(project)
-        return self.run(project.id)
 
     def block(self, project_id: str, reason: str, actor_id: str) -> ProjectState:
         project = self.store.load(project_id)
@@ -256,8 +295,12 @@ class InstitutionalEngine:
             confidence=Confidence(score=0.5, rationale="No project work completed yet."),
             created_by=created_by,
         )
+        if binding := project.worker_models.get(worker.role):
+            worker.provider = binding.provider
+            worker.model = binding.model
+            worker.allowed_tools = []
         project.workers[worker.id] = worker
-        project.worker_budgets[worker.id] = Budget(max_calls=30, max_tokens=30_000)
+        project.worker_budgets[worker.id] = Budget(max_calls=8, max_tokens=100_000)
         self.store.ensure_workspace(project, worker.id)
         self._event(
             project,
@@ -307,8 +350,12 @@ class InstitutionalEngine:
         ]
 
     def _form_team(self, project: ProjectState) -> None:
-        self.transition(project, ProjectStatus.TEAM_FORMING, "system")
+        if project.status == ProjectStatus.CREATED:
+            self.transition(project, ProjectStatus.TEAM_FORMING, "system")
         templates = project.constitution.allowed_role_templates
+        if project.director_worker_id is not None:
+            self._plan_team(project)
+            return
         director = self.add_worker(project, templates["ResearchDirector"], "system")
         project.director_worker_id = director.id
         director_task = self._add_task(
@@ -330,6 +377,11 @@ class InstitutionalEngine:
                 "Mission accountability",
                 director.id,
             )
+        self.store.save(project)
+        self._plan_team(project)
+
+    def _plan_team(self, project: ProjectState) -> None:
+        director = self._worker_by_role(project, "ResearchDirector")
         mathematician = self._worker_by_role(project, "Mathematician")
         planning = self._call_provider(
             project,
@@ -343,8 +395,17 @@ class InstitutionalEngine:
             ),
         )
         for requested in planning.role_requests:
+            if any(worker.role == requested.requested_role for worker in project.workers.values()):
+                continue
             role_request = self.submit_role_request(project, mathematician, director, requested)
             self.decide_role_request(project, role_request, director, RoleRequestStatus.APPROVED)
+        # Review obligations are policy, not optional model suggestions. Staff any missing reviewer.
+        staffed = {worker.role for worker in project.workers.values()}
+        required_roles = {role for roles in project.constitution.mandatory_reviewers.values() for role in roles}
+        for role in sorted(required_roles - staffed):
+            worker = self.add_worker(project, project.constitution.allowed_role_templates[role], director.id)
+            self._add_task(project, worker, "Mandatory review expertise", "Assess fleet solver feasibility and bounded fallback.", "operations_research")
+            self._add_edge(project, worker.id, director.id, RelationKind.REPORTS_TO, "Mandatory reviewer required by constitution", director.id)
         required = [
             worker.id for worker in project.workers.values() if worker.role != "ResearchDirector"
         ]
@@ -360,8 +421,9 @@ class InstitutionalEngine:
 
     def _independent_work(self, project: ProjectState) -> None:
         barrier = self._require_barrier(project)
-        drafts: list[tuple[SpecialistReport, str]] = []
         for worker_id in barrier.required_worker_ids:
+            if worker_id in barrier.committed_report_ids:
+                continue
             worker = project.workers[worker_id]
             worker.status = WorkerStatus.WORKING
             task = self._task_for(project, worker_id)
@@ -383,14 +445,13 @@ class InstitutionalEngine:
             )
             if result.report is None or result.artifact_markdown is None:
                 raise InstitutionalError(f"provider returned no report for {worker.role}")
-            drafts.append((result.report, result.artifact_markdown))
+            self._commit_initial_report(project, result.report, result.artifact_markdown)
+            self.store.save(project)
         self.transition(
             project,
             ProjectStatus.REPORT_COMMIT,
             project.director_worker_id or "system",
         )
-        for report, markdown in drafts:
-            self._commit_initial_report(project, report, markdown)
         if not barrier.unlocked:
             raise IndependenceBarrierError("report barrier did not unlock")
         self.transition(
@@ -445,7 +506,9 @@ class InstitutionalEngine:
             project.reports[report_id] for report_id in barrier.committed_report_ids.values()
         ]
         for report in initial_reports:
-            report.status = ReportStatus.UNDER_REVIEW
+            was_disputed = report.status == ReportStatus.DISPUTED
+            if not was_disputed:
+                report.status = ReportStatus.UNDER_REVIEW
             owner = project.workers[report.worker_id]
             reviewer_roles = GovernancePolicy(project.constitution).required_reviewer_roles(
                 report.subject_type
@@ -453,6 +516,9 @@ class InstitutionalEngine:
             for role in reviewer_roles:
                 reviewer = self._worker_by_role(project, role)
                 if reviewer.id == owner.id:
+                    continue
+                if any(review.report_id == report.id and review.reviewer_worker_id == reviewer.id
+                       for review in project.reviews.values()):
                     continue
                 review_request = self.send_message(
                     project,
@@ -487,9 +553,10 @@ class InstitutionalEngine:
                 if result.review is None:
                     raise InstitutionalError(f"provider returned no review from {role}")
                 self._record_review(project, result.review)
+                self.store.save(project)
         for report in initial_reports:
             reviews = self._reviews_for(project, report.id)
-            if any(review.verdict == ReviewVerdict.DISPUTE for review in reviews):
+            if report.status == ReportStatus.DISPUTED or any(review.verdict == ReviewVerdict.DISPUTE for review in reviews):
                 report.status = ReportStatus.DISPUTED
             elif any(review.verdict == ReviewVerdict.CHANGES_REQUESTED for review in reviews):
                 report.status = ReportStatus.CHANGES_REQUESTED
@@ -516,6 +583,8 @@ class InstitutionalEngine:
             if report.status == ReportStatus.CHANGES_REQUESTED
         ]
         for prior in change_requests:
+            if any(report.supersedes_report_id == prior.id for report in project.reports.values()):
+                continue
             worker = project.workers[prior.worker_id]
             reviews = self._reviews_for(project, prior.id)
             result = self._call_provider(
@@ -538,6 +607,9 @@ class InstitutionalEngine:
             if result.report is None or result.artifact_markdown is None:
                 raise InstitutionalError(f"provider returned no revision for {worker.role}")
             revised = result.report
+            if revised.id in project.reports:
+                raise InstitutionalError("revision id already exists")
+            GovernancePolicy(project.constitution).validate_report_evidence(revised.evidence)
             artifact = self.store.write_artifact(
                 project,
                 worker.id,
@@ -558,6 +630,7 @@ class InstitutionalEngine:
                 revised.id,
                 {"version": revised.version, "supersedes": prior.id},
             )
+            self.store.save(project)
         self.transition(
             project,
             ProjectStatus.DIRECTOR_SYNTHESIS,
@@ -647,7 +720,10 @@ class InstitutionalEngine:
             markdown,
         )
         report.artifact_refs.append(artifact.id)
-        report.status = ReportStatus.COMMITTED
+        if report.id in project.reports:
+            raise InstitutionalError("report id already exists")
+        if report.status != ReportStatus.DISPUTED:
+            report.status = ReportStatus.COMMITTED
         report.content_sha256 = self._report_hash(report)
         project.reports[report.id] = report
         barrier.committed_report_ids[report.worker_id] = report.id
@@ -910,6 +986,14 @@ class InstitutionalEngine:
         return edge
 
     def _call_provider(self, project: ProjectState, request: WorkRequest) -> ProviderResult:
+        control = CURRENT_RUN.get()
+        if control:
+            control.check()
+        if request.action == WorkAction.ANALYSE and (request.visible_reports or request.reviews or request.report_to_review or request.prior_report):
+            raise IndependenceBarrierError("independent analysis cannot contain peer conclusions")
+        if request.action in {WorkAction.REVIEW, WorkAction.REVISE, WorkAction.SYNTHESIZE} and not self._require_barrier(project).unlocked:
+            raise IndependenceBarrierError("review and synthesis require all independent commits")
+        provider = self.provider.select(request) if isinstance(self.provider, ProviderDispatcher) else self.provider
         worker_budget = project.worker_budgets[request.worker.id]
         self._authorize_budget(project.project_budget)
         self._authorize_budget(worker_budget)
@@ -919,13 +1003,29 @@ class InstitutionalEngine:
             request.worker.id,
             project.id,
             {
-                "provider": self.provider.name,
+                "provider": provider.name,
+                "model": request.worker.model,
                 "action": request.action.value,
                 "visible_report_ids": [report.id for report in request.visible_reports],
                 "memory_ids": [memory.id for memory in request.memories],
             },
         )
-        result = self.provider.run(request)
+        # Count attempts, including failures, before invoking anything billable.
+        project.project_budget.used_calls += 1
+        worker_budget.used_calls += 1
+        self.store.save(project)
+        started = time.monotonic()
+        try:
+            result = provider.run(request.model_copy(deep=True))
+            validate_result(request, result)
+            if control:
+                control.check()
+        finally:
+            elapsed = time.monotonic() - started
+            project.project_budget.used_wall_seconds += elapsed
+            worker_budget.used_wall_seconds += elapsed
+        result.usage.calls = 0  # Already reserved above; never trust model-supplied call accounting.
+        result.usage.wall_seconds = 0  # Accounted using the host's monotonic clock.
         self._ensure_usage_fits(project.project_budget, result)
         self._ensure_usage_fits(worker_budget, result)
         self._record_usage(project.project_budget, result)
@@ -936,9 +1036,11 @@ class InstitutionalEngine:
             request.worker.id,
             project.id,
             {
-                "provider": self.provider.name,
+                "provider": provider.name,
+                "model": result.model or request.worker.model,
+                "model_source": result.model_source or "provider_configuration",
                 "action": request.action.value,
-                "usage": result.usage.model_dump(),
+                "usage": {**result.usage.model_dump(), "calls": 1, "wall_seconds": elapsed},
             },
         )
         return result
@@ -969,12 +1071,12 @@ class InstitutionalEngine:
 
     def _fail(self, project: ProjectState, error: Exception) -> None:
         checkpoint = project.status
-        project.status = ProjectStatus.FAILED
+        project.status = ProjectStatus.BLOCKED if isinstance(error, Cancelled) else ProjectStatus.FAILED
         project.resume_from = checkpoint
         project.failure = f"{type(error).__name__}: {error}"
         self._event(
             project,
-            "project.failed",
+            "project.blocked" if isinstance(error, Cancelled) else "project.failed",
             project.director_worker_id or "system",
             project.id,
             {"checkpoint": checkpoint.value, "error": project.failure},

@@ -54,6 +54,51 @@ class ProviderResult(StrictModel):
     role_requests: list[RoleRequestPayload] = Field(default_factory=list)
     artifact_markdown: str | None = None
     usage: Usage = Field(default_factory=Usage)
+    provider: str | None = None
+    model: str | None = None
+    model_source: str | None = None
+
+
+def validate_result(request: WorkRequest, result: ProviderResult) -> None:
+    """Models supply content; identity, ownership and versioning are enforced here."""
+    expected = {
+        WorkAction.PLAN: None, WorkAction.ANALYSE: "report", WorkAction.REVIEW: "review",
+        WorkAction.REVISE: "report", WorkAction.SYNTHESIZE: "director_report",
+    }[request.action]
+    present = [key for key in ("report", "review", "director_report") if getattr(result, key) is not None]
+    if present != ([expected] if expected else []):
+        raise ValueError("provider returned the wrong action payload")
+    if request.action != WorkAction.PLAN and result.role_requests:
+        raise ValueError("role requests are allowed only during planning")
+    if result.report:
+        report, task = result.report, request.task
+        if task is None or (report.worker_id, report.project_id, report.task_id, report.subject_type) != (
+            request.worker.id, request.project_id, task.id, task.subject_type
+        ):
+            raise ValueError("report identity does not match the assigned work")
+        if not report.conclusion.strip() or not report.evidence or not result.artifact_markdown:
+            raise ValueError("report requires a conclusion, evidence and an artifact")
+        prior = request.prior_report
+        if prior:
+            if (report.version != prior.version + 1 or report.supersedes_report_id != prior.id
+                    or report.id == prior.id or report.status not in {ReportStatus.REVISED, ReportStatus.DISPUTED}):
+                raise ValueError("revision must be a new attributable version")
+        elif report.version != 1 or report.supersedes_report_id is not None:
+            raise ValueError("independent report must be version one")
+        allowed_refs = set(prior.artifact_refs) if prior else set()
+        if not set(report.artifact_refs) <= allowed_refs:
+            raise ValueError("report invented artifact references")
+    if result.review:
+        review, target = result.review, request.report_to_review
+        if target is None or (review.project_id, review.reviewer_worker_id, review.report_id,
+                review.report_version, review.subject_type) != (
+                request.project_id, request.worker.id, target.id, target.version, target.subject_type):
+            raise ValueError("review identity does not match its assignment")
+    if result.director_report:
+        report_director = result.director_report
+        if (report_director.project_id, report_director.director_worker_id) != (
+                request.project_id, request.worker.id):
+            raise ValueError("Director report identity does not match its assignment")
 
 
 class Provider(Protocol):
