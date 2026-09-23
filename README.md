@@ -10,6 +10,16 @@ No paid model call is required.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) and [MIGRATION_PLAN.md](MIGRATION_PLAN.md).
 
+## Next research question (planned, not run)
+
+Do expert-role prompts improve performance on objectively scored specialist tasks compared with
+neutral prompting?
+
+The planned comparison keeps the underlying model, task information, tools and inference budget the
+same, so the effect of persona wording is measured separately from the effects of extra agents, extra
+context or additional review rounds. No experiment has been run yet. This release uses a
+deterministic demo provider, so it contains no evidence either way.
+
 ## Run it
 
 Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/).
