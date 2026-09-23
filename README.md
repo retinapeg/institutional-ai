@@ -22,9 +22,9 @@ the provider for each worker action with only that worker's task, scoped memory 
 reports, checking project and worker budgets before and after every call. Initial reports stay sealed
 behind the barrier until every required specialist commits; mandatory reviews, revisions and the
 Director synthesis follow, and `ProjectStore` persists each step as `state.json`, hash-linked
-`events.jsonl` and per-worker workspace artifacts. The API and dashboard only create and run missions
-through the engine and read the resulting snapshot; [ARCHITECTURE.md](ARCHITECTURE.md) lists the
-invariants.
+`events.jsonl` and per-worker workspace artifacts. The API and dashboard only create, run or recover
+missions through the engine and read the resulting snapshot; [ARCHITECTURE.md](ARCHITECTURE.md) lists
+the invariants.
 
 ## Does it use AI at runtime?
 

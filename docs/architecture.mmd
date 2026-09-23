@@ -3,8 +3,8 @@
 %% Render: npx @mermaid-js/mermaid-cli -i docs/architecture.mmd -o docs/images/architecture.svg -b white
 flowchart TD
     U["User<br/>mission text"]
-    UI["Dashboard<br/>static/index.html"]
     CLI["CLI (cli.py)<br/>demo · serve · inspect"]
+    UI["Dashboard<br/>static/index.html"]
     API["FastAPI app (api.py)<br/>/api/projects routes"]
     ENG["InstitutionalEngine<br/>(engine.py)<br/>team → barrier → review<br/>→ revision → Director"]
     GOV["Governance<br/>(governance.py)<br/>jurisdiction · reviewers<br/>role creation · dissent"]
@@ -13,19 +13,20 @@ flowchart TD
     STORE["ProjectStore (store.py)<br/>state.json · events.jsonl<br/>workspaces · org memory"]
     TEST["pytest suite<br/>engine + API tests"]
 
-    U -->|mission form| UI
     U -->|mission| CLI
-    UI -->|HTTP JSON| API
-    CLI -->|serve| API
+    U -->|mission form| UI
     CLI -->|demo| ENG
+    CLI -->|serve| API
+    UI -->|HTTP JSON| API
+    API -->|"create, run,<br/>recover"| ENG
     CLI -->|inspect| STORE
-    API -->|"create · run<br/>· recover"| ENG
     API -->|load snapshot| STORE
     ENG -->|authority checks| GOV
     ENG <-->|"WorkRequest /<br/>ProviderResult"| PROV
     ENG -->|"state, events,<br/>artifacts, memory"| STORE
     PROV -.-|same Provider protocol| LIVE
     TEST -.->|exercise| ENG
+    TEST -.->|exercise| API
 
     class U human;
     class CLI,UI,API,ENG,GOV det;
