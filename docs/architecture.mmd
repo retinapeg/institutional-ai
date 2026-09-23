@@ -1,0 +1,42 @@
+%% Architecture of institutional-ai at commit 0da72e7
+%% Sources: src/institutional_ai/cli.py, src/institutional_ai/api.py, src/institutional_ai/static/index.html, src/institutional_ai/engine.py, src/institutional_ai/governance.py, src/institutional_ai/providers.py, src/institutional_ai/store.py, src/institutional_ai/models.py, tests/test_engine.py, tests/test_api.py
+%% Render: npx @mermaid-js/mermaid-cli -i docs/architecture.mmd -o docs/images/architecture.svg -b white
+flowchart TD
+    U["User<br/>mission text"]
+    UI["Dashboard<br/>static/index.html"]
+    CLI["CLI (cli.py)<br/>demo · serve · inspect"]
+    API["FastAPI app (api.py)<br/>/api/projects routes"]
+    ENG["InstitutionalEngine<br/>(engine.py)<br/>team → barrier → review<br/>→ revision → Director"]
+    GOV["Governance<br/>(governance.py)<br/>jurisdiction · reviewers<br/>role creation · dissent"]
+    PROV["FleetDemoProvider<br/>(providers.py)<br/>canned outputs, no model"]
+    LIVE["Real model adapter<br/>planned, not in this release"]
+    STORE["ProjectStore (store.py)<br/>state.json · events.jsonl<br/>workspaces · org memory"]
+    TEST["pytest suite<br/>engine + API tests"]
+
+    U -->|mission form| UI
+    U -->|mission| CLI
+    UI -->|HTTP JSON| API
+    CLI -->|serve| API
+    CLI -->|demo| ENG
+    CLI -->|inspect| STORE
+    API -->|"create · run<br/>· recover"| ENG
+    API -->|load snapshot| STORE
+    ENG -->|authority checks| GOV
+    ENG <-->|"WorkRequest /<br/>ProviderResult"| PROV
+    ENG -->|"state, events,<br/>artifacts, memory"| STORE
+    PROV -.-|same Provider protocol| LIVE
+    TEST -.->|exercise| ENG
+
+    class U human;
+    class CLI,UI,API,ENG,GOV det;
+    class PROV,LIVE mock;
+    class STORE store;
+    class TEST eval;
+
+    classDef ai fill:#efe7fb,stroke:#6a4c93,stroke-width:2px,color:#2b1d45;
+    classDef det fill:#eef3f8,stroke:#2f5d8a,stroke-width:1.5px,color:#172c37;
+    classDef human fill:#e8f0ec,stroke:#285b48,stroke-width:1.5px,color:#173f32;
+    classDef eval fill:#f7efdf,stroke:#8b6330,stroke-width:1.5px,color:#4a3413;
+    classDef store fill:#f3f4f1,stroke:#65757b,stroke-width:1.5px,color:#172c37;
+    classDef ext fill:#ffffff,stroke:#2f5d8a,stroke-width:1.5px,stroke-dasharray:4 3,color:#172c37;
+    classDef mock fill:#ffffff,stroke:#9aa5a8,stroke-width:1.5px,stroke-dasharray:6 4,color:#65757b;
