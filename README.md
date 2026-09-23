@@ -10,6 +10,29 @@ No paid model call is required.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) and [MIGRATION_PLAN.md](MIGRATION_PLAN.md).
 
+## System architecture
+
+![Architecture diagram: a mission from the CLI or dashboard reaches InstitutionalEngine, which applies governance checks, calls the deterministic FleetDemoProvider and persists everything through ProjectStore](docs/images/architecture.svg)
+
+*Purple: model call · blue: deterministic code · green: human · amber: evaluation · grey: storage · dashed: external, optional, mocked or planned*
+
+A mission enters through `institutional-ai demo` or the dashboard form (`POST /api/projects`, then
+`/run`). `InstitutionalEngine` forms the team under the Constitution in `governance.py`, then calls
+the provider for each worker action with only that worker's task, scoped memory and permitted
+reports, checking project and worker budgets before and after every call. Initial reports stay sealed
+behind the barrier until every required specialist commits; mandatory reviews, revisions and the
+Director synthesis follow, and `ProjectStore` persists each step as `state.json`, hash-linked
+`events.jsonl` and per-worker workspace artifacts. The API and dashboard only create, run or recover
+missions through the engine and read the resulting snapshot; [ARCHITECTURE.md](ARCHITECTURE.md) lists
+the invariants.
+
+## Does it use AI at runtime?
+
+No. Every specialist report, peer review, revision, role request and Director synthesis at this
+commit comes from `FleetDemoProvider`, a deterministic role-keyed lookup with fixed usage figures and
+no model or network call; the `Provider` protocol in `providers.py` is where a real model adapter
+would attach, and none ships in this release (see [Real versus mocked](#real-versus-mocked)).
+
 ## Next research question (planned, not run)
 
 Do expert-role prompts improve performance on objectively scored specialist tasks compared with
@@ -86,6 +109,8 @@ paid calls. A real provider adapter is the next integration boundary, not a chan
 ## Dashboard evidence
 
 ![Institutional AI dashboard showing the dynamic team, reports, dissent, Director report, and audit log](evidence/dashboard.png)
+
+*Dashboard after one deterministic demo run; all specialist text and fleet data are synthetic.*
 
 ## Deliberate limits
 
